@@ -26,6 +26,12 @@ u32_t  = 420
 u64_t  = 420
 u128_t = 420
 
+[booleans]
+bool_t = true
+b8_t = false
+b32_t = true
+b64_t = false
+
 [floats]
 f16_t = 420.69
 f32_t = 69.420
@@ -50,6 +56,7 @@ Test_Config :: struct {
     misc: Misc,
     signed: Signed_Integers `ini_section:"signed_integers"`,
     unsigned: Unsigned_Integers `ini_section:"unsigned_integers"`,
+    booleans: Booleans,
     floats: Floats,
     strings: Strings,
     complex: Complex,
@@ -79,6 +86,13 @@ Unsigned_Integers :: struct {
     u32_t: u32,
     u64_t: u64,
     u128_t: u128,
+}
+
+Booleans :: struct {
+    bool_t: bool,
+    b8_t: b8,
+    b32_t: b32,
+    b64_t: b64,
 }
 
 Floats :: struct {
@@ -134,6 +148,14 @@ check :: proc(config: Test_Config) -> bool {
         not_ok |= u32_t != 420
         not_ok |= u64_t != 420
         not_ok |= u128_t != 420
+    }
+
+    {
+        using booleans := config.booleans
+        not_ok |= bool_t != true
+        not_ok |= b8_t != false
+        not_ok |= b32_t != true
+        not_ok |= b64_t != false
     }
 
     {
