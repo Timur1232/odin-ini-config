@@ -158,8 +158,8 @@ config_load_from_path :: proc(model: ^$T, path: string, ini_allocator := context
 
 // See config_parse
 config_load_from_string :: proc(model: ^$T, src: string, ini_allocator := context.temp_allocator, string_allocator := context.allocator) -> Parse_Result {
-    ini_map, err, ok := ini.load_map_from_string(src, ini_allocator)
-    if err != nil || !ok do return .Fatal_Error
+    ini_map, err := ini.load_map_from_string(src, ini_allocator)
+    if err != nil do return .Fatal_Error
     return config_parse(model, ini_map, string_allocator)
 }
 
