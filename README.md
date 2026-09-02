@@ -1,4 +1,4 @@
-# Odin INI config
+# Odin INI config (WIP)
 
 Simple ini parser for custom configuration model written in Odin.
 
@@ -53,3 +53,7 @@ config: Config
 some_defaults(&config)
 iniconf.config_load_from_path(&config, "config.ini")
 ```
+
+## Todo
+
+- [ ] Fix quaternions
