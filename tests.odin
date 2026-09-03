@@ -54,8 +54,8 @@ q256 = 1+2i+3j+4k
 
 Test_Config :: struct {
     misc: Misc,
-    signed: Signed_Integers `ini_section:"signed_integers"`,
-    unsigned: Unsigned_Integers `ini_section:"unsigned_integers"`,
+    signed: Signed_Integers `ini:"signed_integers"`,
+    unsigned: Unsigned_Integers `ini:"unsigned_integers"`,
     booleans: Booleans,
     floats: Floats,
     strings: Strings,
@@ -70,7 +70,7 @@ Misc :: struct {
 }
 
 Signed_Integers :: struct {
-    int_value: int `ini_option:"int_t"`,
+    int_value: int `ini:"int_t"`,
     i8_t: i8,
     i16_t: i16,
     i32_t: i32,
@@ -80,7 +80,7 @@ Signed_Integers :: struct {
 
 Unsigned_Integers :: struct {
     uintptr_t: uintptr,
-    uint_value: uint `ini_option:"uint_t"`,
+    uint_value: uint `ini:"uint_t"`,
     u8_t: u8,
     u16_t: u16,
     u32_t: u32,
@@ -208,7 +208,7 @@ test :: proc(t: ^testing.T) {
     testing.expect(t, check(config), fmt.tprintf("Incorrect values: %v\n%s", config, data))
 }
 
-// Run test with `-define:LOG_UNRECOGNIZED=true -define:LOG_NOT_PRESENTED=true`
+// Run test with `-define:INI_LOG_UNRECOGNIZED=true -define:INI_LOG_NOT_PRESENTED=true`
 @(test)
 test_logging :: proc(t: ^testing.T) {
     defer free_all(context.temp_allocator)
@@ -216,13 +216,13 @@ test_logging :: proc(t: ^testing.T) {
 
     Bogus_Config :: struct {
         aboba: struct {
-            urmom: int `ini_option:"test"`,
+            urmom: int `ini:"test"`,
             should_be_not_presented: string,
         },
         urmom: struct {
             aboba: f32,
-            test: int `ini_option:"also_should_be_not_presented"`,
-        } `ini_section:"test"`,
+            test: int `ini:"also_should_be_not_presented"`,
+        } `ini:"test"`,
         should_be_not_presented: struct {
             test: int,
         },

@@ -5,7 +5,7 @@ import "core:log"
 import "core:fmt"
 
 Config :: struct {
-    style: Style_Section `ini_section:"urmom"`,
+    style: Style_Section `ini:"urmom"`,
     window: Window_Section,
 }
 
@@ -17,7 +17,7 @@ Style_Section :: struct {
 }
 
 Window_Section :: struct {
-    x: int `ini_option:"aboba"`,
+    x: int `ini:"aboba"`,
     y: int,
     width, height: int,
 }

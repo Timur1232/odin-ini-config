@@ -6,7 +6,7 @@ Simple ini parser for custom configuration model written in Odin.
 
 Config model must be a struct with fields correspond to ini sections. Sections must be structs as well. Section fields must be either primitive types, like any integer, any float or string (cstring), or an array of any intergers with length 4 for color type (e.g. \[4\]u8).
 
-Section name are taken from field name or from tag with key `ini_section`. Option name are also taken from field name or from tag with key `ini_option` (see example).
+Section and option names are taken from field name or from field tag with key `ini` (see example).
 
 Example:
 
@@ -16,7 +16,7 @@ package main
 import "iniconf"
 
 Config :: struct {
-    style: Style_Section `ini_section:"urmom"`,
+    style: Style_Section `ini:"urmom"`,
     window: Window_Section,
 }
 
@@ -28,7 +28,7 @@ Style_Section :: struct {
 }
 
 Window_Section :: struct {
-    x: int `ini_option:"aboba"`,
+    x: int `ini:"aboba"`,
     y: int,
     width, height: int,
 }
@@ -57,8 +57,8 @@ iniconf.config_load_from_path(&config, "config.ini")
 > [!NOTE]
 > Be careful with names, as it will skip all unrecognized names and fields that not presented inside ini file without logging by default (see test_logging in tests.odin).
 >
-> To turn on logging not presented sections and options, set `-define:"LOG_NOT_PRESENTED"`.
-> To turn on logging unrecognized sections and options, set `-define:"LOG_UNRECOGNIZED"`.
+> To turn on logging not presented sections and options, set `-define:"INI_LOG_NOT_PRESENTED"`.
+> To turn on logging unrecognized sections and options, set `-define:"INI_LOG_UNRECOGNIZED"`.
 
 ## Todo
 

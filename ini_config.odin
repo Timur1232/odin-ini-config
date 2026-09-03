@@ -1,23 +1,18 @@
 //
 // Generic parser for custom configuration model.
 //
-// Model type must be struct. Each field is representing ini sections and must
-// be struct as well.
+// Model type must be struct. Each field is representing ini sections and must be struct as well.
 //
-// Section structs must contain only primitive types, like
-// integers, floats and strings, or color types. Color type is 4 element array
-// of any integer (e.g. [4]u8).
+// Section structs must contain only primitive types, like integers, floats and strings, or color types. Color type is 4 element array of any integer (e.g. [4]u8).
 //
 // Strings are cloned to passed allocator.
 //
-// Section names taken either from field name or tag with key `ini_section`.
-//
-// Option names taken either from field name of tag with key `ini_option`.
+// Section and option names are taken either from field name or field tag with key `ini`.
 //
 // Example:
 // ```odin
 // Config_Model :: struct {
-//     style: Style_Section `ini_section:"urmom"`,
+//     style: Style_Section `ini:"urmom"`,
 //     window: Window_Section,
 // }
 //
@@ -29,7 +24,7 @@
 // }
 //
 // Window_Section :: struct {
-//     x: int `ini_option:"aboba"`,
+//     x: int `ini:"aboba"`,
 //     y: int,
 //     width, height: int,
 // }
@@ -54,23 +49,22 @@
 // iniconf.config_load_from_path(&config, "config.ini")
 // ```
 //
-// To turn logging not presented sections and options, set `-define:LOG_NOT_PRESENTED=true`.
-// To turn logging unrecognized sections and options, set `-define:LOG_UNRECOGNIZED=true`.
+// To turn logging not presented sections and options, set `-define:INI_LOG_NOT_PRESENTED=true`.
+// To turn logging unrecognized sections and options, set `-define:INI_LOG_UNRECOGNIZED=true`.
 //
 package ini_config
 
-INI_SECTION_TAG_KEY :: "ini_section"
-INI_OPTION_TAG_KEY  :: "ini_option"
+INI_TAG_KEY :: "ini"
 
 COLOR_FORMAT_STRING_LENGTH :: 9 // "#rrggbbaa"
 
 // Will log if section or option from model is not presented inside ini file
-LOG_NOT_PRESENTED :: #config(LOG_NOT_PRESENTED, false)
+LOG_NOT_PRESENTED :: #config(INI_LOG_NOT_PRESENTED, false)
 
 // Will log unrecognized sections or options
-LOG_UNRECOGNIZED :: #config(LOG_UNRECOGNIZED, false)
+LOG_UNRECOGNIZED :: #config(INI_LOG_UNRECOGNIZED, false)
 
-// Default block size for arena, that storing strings of proccessed sections and options. Used only when LOG_UNRECOGNIZED is true.
+// Default block size for arena, that storing strings of proccessed sections and options. Used only when `LOG_UNRECOGNIZED` is true.
 PROCCESSED_ARENA_BLOCK_SIZE :: #config(PROCCESSED_ARENA_BLOCK_SIZE, 1024*4)
 
 Parse_Result :: enum {
@@ -79,10 +73,10 @@ Parse_Result :: enum {
     Fatal_Error,
 }
 
-// Paramenters:
+// Parameters:
 // - model: ^<generic struct> - pointer to user's configuration model.
 // - ini_map: ini.Map - map, loaded from ini file with `core:encoding/ini` package.
-// - allocator: runtime.Allocator - for storing strings. Also used for finding unrecognized options when `LOG_UNRECOGNIZED` is true.
+// - allocator: runtime.Allocator - for storing strings. Also used as backing allocator for arena to finding unrecognized options when `LOG_UNRECOGNIZED` is true (memory will be freed).
 //
 // Returns:
 // - res: Parse_Result - whether parsing is successful or not. Ok - ok, Has_Parse_Errors - configuration has syntax errors (parser will skip them), Fatal_Error - fatal error (parsing is stopped)
@@ -101,7 +95,7 @@ config_parse :: proc(model: ^$T, ini_map: ini.Map, allocator := context.allocato
     }
 
     for i in 0..<model_ti.field_count {
-        section_name := get_ini_name(&model_ti, i, INI_SECTION_TAG_KEY)
+        section_name := get_ini_name(&model_ti, i, INI_TAG_KEY)
 
         if section_map, ok := ini_map[section_name]; ok {
             section_ti := reflect.type_info_base(model_ti.types[i])
@@ -115,7 +109,7 @@ config_parse :: proc(model: ^$T, ini_map: ini.Map, allocator := context.allocato
             #partial switch &section_v in section_ti.variant {
             case runtime.Type_Info_Struct:
                 for j in 0..<section_v.field_count {
-                    option_name := get_ini_name(&section_v, j, INI_OPTION_TAG_KEY)
+                    option_name := get_ini_name(&section_v, j, INI_TAG_KEY)
 
                     if option_str, ok := section_map[option_name]; ok {
                         option_ti := reflect.type_info_base(section_v.types[j])
@@ -201,28 +195,41 @@ config_parse :: proc(model: ^$T, ini_map: ini.Map, allocator := context.allocato
 }
 
 // See config_parse
-config_load_from_path :: proc(model: ^$T, path: string, ini_allocator := context.temp_allocator, string_allocator := context.allocator, loc := #caller_location) -> Parse_Result {
+config_load_from_path :: proc(model: ^$T, path: string, ini_allocator := context.temp_allocator, allocator := context.allocator, loc := #caller_location) -> Parse_Result {
     ini_map, err, ok := ini.load_map_from_path(path, ini_allocator)
     if err != nil || !ok do return .Fatal_Error
-    return config_parse(model, ini_map, string_allocator, loc)
+    return config_parse(model, ini_map, allocator, loc)
 }
 
 // See config_parse
-config_load_from_string :: proc(model: ^$T, src: string, ini_allocator := context.temp_allocator, string_allocator := context.allocator, loc := #caller_location) -> Parse_Result {
+config_load_from_string :: proc(model: ^$T, src: string, ini_allocator := context.temp_allocator, allocator := context.allocator, loc := #caller_location) -> Parse_Result {
     ini_map, err := ini.load_map_from_string(src, ini_allocator)
     if err != nil do return .Fatal_Error
-    return config_parse(model, ini_map, string_allocator, loc)
+    return config_parse(model, ini_map, allocator, loc)
 }
 
-// See config_parse
-config_save_to_map :: proc(model: ^$T, ini_map: ^ini.Map, string_allocator := context.temp_allocator, loc := #caller_location) -> (ok: bool) {
+// Saving config model to ini map with correct formating
+//
+// Parameters:
+// - model: ^<generic struct> - pointer to user's configuration model.
+// - ini_map: ini.Map - map from `core:encoding/ini` package to write formated configuration.
+// - allocator: runtime.Allocator - for allocating strings and as ini map allocator if not set.
+//
+// Returns:
+// - ok: bool - success indicator
+config_save_to_map :: proc(model: ^$T, ini_map: ^ini.Map, allocator := context.temp_allocator, loc := #caller_location) -> (ok: bool) {
     model_ti := reflect.type_info_base(type_info_of(T)).variant.(runtime.Type_Info_Struct)
 
+    if ini_map.allocator.procedure == nil {
+        ini_map.allocator = allocator
+    }
+
     for i in 0..<model_ti.field_count {
-        section_name := get_ini_name(&model_ti, i, INI_SECTION_TAG_KEY)
+        section_name := get_ini_name(&model_ti, i, INI_TAG_KEY)
 
         ini_map[section_name] = {}
         section_map := &ini_map[section_name]
+        section_map.allocator = ini_map.allocator
 
         section_ti := reflect.type_info_base(model_ti.types[i])
         section_offset := cast(uintptr)model + model_ti.offsets[i]
@@ -230,7 +237,7 @@ config_save_to_map :: proc(model: ^$T, ini_map: ^ini.Map, string_allocator := co
         #partial switch &section_v in section_ti.variant {
         case runtime.Type_Info_Struct:
             for j in 0..<section_v.field_count {
-                option_name := get_ini_name(&section_v, j, INI_OPTION_TAG_KEY)
+                option_name := get_ini_name(&section_v, j, INI_TAG_KEY)
                 option_ptr := cast(rawptr)(section_offset + section_v.offsets[j])
 
                 option_str: string
@@ -240,7 +247,7 @@ config_save_to_map :: proc(model: ^$T, ini_map: ^ini.Map, string_allocator := co
                     #partial switch elem_v in color_field.elem.variant {
                     case runtime.Type_Info_Integer:
                         sb: strings.Builder
-                        strings.builder_init_len_cap(&sb, 0, COLOR_FORMAT_STRING_LENGTH, string_allocator)
+                        strings.builder_init_len_cap(&sb, 0, COLOR_FORMAT_STRING_LENGTH, allocator)
                         strings.write_rune(&sb, '#')
                         buf: [2]u8
 
@@ -262,7 +269,7 @@ config_save_to_map :: proc(model: ^$T, ini_map: ^ini.Map, string_allocator := co
                     option: any
                     option.id = section_v.types[j].id
                     option.data = option_ptr
-                    option_str = fmt.aprint(option, allocator = string_allocator)
+                    option_str = fmt.aprint(option, allocator = allocator)
                 }
 
                 section_map[option_name] = option_str
@@ -288,7 +295,7 @@ config_save_to_path :: proc(model: ^$T, path: string, allocator := context.temp_
     return
 }
 
-@(require_results)
+@(require_results, private)
 get_ini_name :: proc(type_info_struct: ^reflect.Type_Info_Struct, i: i32, tag_name: string) -> string {
     tag := reflect.struct_tag_get(cast(reflect.Struct_Tag)type_info_struct.tags[i], tag_name)
     if tag == "" {
