@@ -54,8 +54,16 @@ some_defaults(&config)
 iniconf.config_load_from_path(&config, "config.ini")
 ```
 
+> [!info]
+> Be careful with names, as it will skip all unrecognized names and fields that not presented inside ini file without logging by default (see test_logging in tests.odin).
+>
+> To turn on logging not presented sections and options, set `-define:"LOG_NOT_PRESENTED"`.
+> To turn on logging unrecognized sections and options, set `-define:"LOG_UNRECOGNIZED"`.
+
 ## Todo
 
-- [ ] Fix quaternions
+- [x] Fix quaternions (it wasnt even broken - the test was wrong)
 - [ ] Test all types from `parse_and_set_pointer_by_base_type` function
 - [ ] Modify `parse_and_set_pointer_by_base_type` function to have more descriptive error return instead bool
+- [ ] Clean code?
+- [ ] Custom parsers?

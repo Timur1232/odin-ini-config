@@ -1,3 +1,4 @@
+//
 // Generic parser for custom configuration model.
 //
 // Model type must be struct. Each field is representing ini sections and must
@@ -52,12 +53,25 @@
 // some_defaults(&config)
 // iniconf.config_load_from_path(&config, "config.ini")
 // ```
+//
+// To turn logging not presented sections and options, set `-define:LOG_NOT_PRESENTED=true`.
+// To turn logging unrecognized sections and options, set `-define:LOG_UNRECOGNIZED=true`.
+//
 package ini_config
 
 INI_SECTION_TAG_KEY :: "ini_section"
 INI_OPTION_TAG_KEY  :: "ini_option"
 
 COLOR_FORMAT_STRING_LENGTH :: 9 // "#rrggbbaa"
+
+// Will log if section or option from model is not presented inside ini file
+LOG_NOT_PRESENTED :: #config(LOG_NOT_PRESENTED, false)
+
+// Will log unrecognized sections or options
+LOG_UNRECOGNIZED :: #config(LOG_UNRECOGNIZED, false)
+
+// Default block size for arena, that storing strings of proccessed sections and options. Used only when LOG_UNRECOGNIZED is true.
+PROCCESSED_ARENA_BLOCK_SIZE :: #config(PROCCESSED_ARENA_BLOCK_SIZE, 1024*4)
 
 Parse_Result :: enum {
     Ok,
@@ -68,14 +82,23 @@ Parse_Result :: enum {
 // Paramenters:
 // - model: ^<generic struct> - pointer to user's configuration model.
 // - ini_map: ini.Map - map, loaded from ini file with `core:encoding/ini` package.
-// - allocator: runtime.Allocator - for storing strings.
+// - allocator: runtime.Allocator - for storing strings. Also used for finding unrecognized options when `LOG_UNRECOGNIZED` is true.
 //
 // Returns:
 // - res: Parse_Result - whether parsing is successful or not. Ok - ok, Has_Parse_Errors - configuration has syntax errors (parser will skip them), Fatal_Error - fatal error (parsing is stopped)
 //
 // See config_load_from_path
-config_parse :: proc(model: ^$T, ini_map: ini.Map, string_allocator := context.allocator) -> (res: Parse_Result) where intrinsics.type_is_struct(T) {
+config_parse :: proc(model: ^$T, ini_map: ini.Map, allocator := context.allocator, loc := #caller_location) -> (res: Parse_Result) where intrinsics.type_is_struct(T) {
     model_ti := reflect.type_info_base(type_info_of(T)).variant.(runtime.Type_Info_Struct)
+
+    when LOG_UNRECOGNIZED {
+        proccessed_arena: mem.Dynamic_Arena
+        mem.dynamic_arena_init(&proccessed_arena, allocator, allocator, PROCCESSED_ARENA_BLOCK_SIZE)
+        defer {
+            mem.dynamic_arena_destroy(&proccessed_arena)
+        }
+        proccessed := make(map[string]map[string]struct{}, mem.dynamic_arena_allocator(&proccessed_arena))
+    }
 
     for i in 0..<model_ti.field_count {
         section_name := get_ini_name(&model_ti, i, INI_SECTION_TAG_KEY)
@@ -83,6 +106,11 @@ config_parse :: proc(model: ^$T, ini_map: ini.Map, string_allocator := context.a
         if section_map, ok := ini_map[section_name]; ok {
             section_ti := reflect.type_info_base(model_ti.types[i])
             section_offset := cast(uintptr)model + model_ti.offsets[i]
+
+            when LOG_UNRECOGNIZED {
+                proccessed[section_name] = {}
+                proccessed_section := &proccessed[section_name]
+            }
 
             #partial switch &section_v in section_ti.variant {
             case runtime.Type_Info_Struct:
@@ -93,16 +121,20 @@ config_parse :: proc(model: ^$T, ini_map: ini.Map, string_allocator := context.a
                         option_ti := reflect.type_info_base(section_v.types[j])
                         option_ptr := cast(rawptr)(section_offset + section_v.offsets[j])
 
+                        when LOG_UNRECOGNIZED {
+                            proccessed_section[option_name] = {}
+                        }
+
                         #partial switch option_v in option_ti.variant {
                         case runtime.Type_Info_String:
                             err: runtime.Allocator_Error
                             if option_v.is_cstring {
-                                (cast(^cstring)option_ptr)^, err = strings.clone_to_cstring(option_str, string_allocator)
+                                (cast(^cstring)option_ptr)^, err = strings.clone_to_cstring(option_str, allocator)
                             } else {
-                                (cast(^string)option_ptr)^, err = strings.clone(option_str, string_allocator)
+                                (cast(^string)option_ptr)^, err = strings.clone(option_str, allocator)
                             }
                             if err != nil {
-                                log.errorf("Allocator error while cloning strings: %v", err)
+                                log.errorf("Allocator error while cloning strings: %v", err, location = loc)
                                 res = .Fatal_Error
                                 return
                             }
@@ -117,54 +149,73 @@ config_parse :: proc(model: ^$T, ini_map: ini.Map, string_allocator := context.a
                                         parse_and_set_ok := parse_and_set_pointer_by_base_type(component_ptr, component_str, option_v.elem, int_hex = true)
                                         if !parse_and_set_ok {
                                             res = .Has_Parse_Errors
-                                            log.errorf("Parse error: Unable to parse or set %d color component of option `%s.%s` with value `%s`", c, section_name, option_name, option_str)
+                                            log.errorf("Parse error: Unable to parse or set %d color component of option `%s.%s` with value `%s`", c, section_name, option_name, option_str, location = loc)
                                             break
                                         }
                                     }
                                 } else {
                                     res = .Has_Parse_Errors
-                                    log.errorf("Parse error: invalid format for `%s.%s`: color type must be in format `#rrggbbaa` in hex", section_name, option_name)
+                                    log.errorf("Parse error: invalid format for `%s.%s`: color type must be in format `#rrggbbaa` in hex", section_name, option_name, location = loc)
                                 }
                             case:
                                 res = .Fatal_Error
-                                log.errorf("Type error: For vector types only array of any 4 integers is supported: for field `%s` expected type `[4]any_int`, but got `%s`", section_v.names[j], elem_v)
+                                log.errorf("Type error: For vector types only array of any 4 integers is supported: for field `%s` expected type `[4]any_int`, but got `%s`", section_v.names[j], elem_v, location = loc)
                                 return
                             }
                         case:
                             parse_and_set_ok := parse_and_set_pointer_by_base_type(option_ptr, option_str, option_ti)
                             if !parse_and_set_ok {
                                 res = .Has_Parse_Errors
-                                log.errorf("Parse error: Unable to parse or set option `%s.%s` with value `%s`", section_name, option_name, option_str)
+                                log.errorf("Parse error: Unable to parse or set option `%s.%s` with value `%s`", section_name, option_name, option_str, location = loc)
                             }
                         }
+                    } else if LOG_NOT_PRESENTED {
+                        log.warnf("Option `%s.%s` is not presented. Skipping.", section_name, option_name, location = loc)
                     }
                 }
             case:
                 res = .Fatal_Error
-                log.errorf("Sections must be structs: type of section field `%s` is `%v`.", model_ti.names[i], section_ti)
+                log.errorf("Sections must be structs: type of section field `%s` is `%v`.", model_ti.names[i], section_ti, location = loc)
                 return
+            }
+        } else if LOG_NOT_PRESENTED {
+            log.warnf("Section `%s` is not presented. Skipping.", section_name, location = loc)
+        }
+    }
+
+    when LOG_UNRECOGNIZED {
+        for section_name, section in ini_map {
+            if proccessed_section, ok := proccessed[section_name]; ok {
+                for option_name in section {
+                    if _, ok := proccessed_section[option_name]; !ok {
+                        log.warnf("Option `%s.%s` unrecognized.", section_name, option_name, location = loc)
+                    }
+                }
+            } else {
+                log.warnf("Section `%s` unrecognized.", section_name, location = loc)
             }
         }
     }
+
     return
 }
 
 // See config_parse
-config_load_from_path :: proc(model: ^$T, path: string, ini_allocator := context.temp_allocator, string_allocator := context.allocator) -> Parse_Result {
+config_load_from_path :: proc(model: ^$T, path: string, ini_allocator := context.temp_allocator, string_allocator := context.allocator, loc := #caller_location) -> Parse_Result {
     ini_map, err, ok := ini.load_map_from_path(path, ini_allocator)
     if err != nil || !ok do return .Fatal_Error
-    return config_parse(model, ini_map, string_allocator)
+    return config_parse(model, ini_map, string_allocator, loc)
 }
 
 // See config_parse
-config_load_from_string :: proc(model: ^$T, src: string, ini_allocator := context.temp_allocator, string_allocator := context.allocator) -> Parse_Result {
+config_load_from_string :: proc(model: ^$T, src: string, ini_allocator := context.temp_allocator, string_allocator := context.allocator, loc := #caller_location) -> Parse_Result {
     ini_map, err := ini.load_map_from_string(src, ini_allocator)
     if err != nil do return .Fatal_Error
-    return config_parse(model, ini_map, string_allocator)
+    return config_parse(model, ini_map, string_allocator, loc)
 }
 
 // See config_parse
-config_save_to_map :: proc(model: ^$T, ini_map: ^ini.Map, string_allocator := context.temp_allocator) -> (ok: bool) {
+config_save_to_map :: proc(model: ^$T, ini_map: ^ini.Map, string_allocator := context.temp_allocator, loc := #caller_location) -> (ok: bool) {
     model_ti := reflect.type_info_base(type_info_of(T)).variant.(runtime.Type_Info_Struct)
 
     for i in 0..<model_ti.field_count {
@@ -204,7 +255,7 @@ config_save_to_map :: proc(model: ^$T, ini_map: ^ini.Map, string_allocator := co
 
                         option_str = strings.to_string(sb)
                     case:
-                        log.errorf("Type error: For vector types only array of any 4 integers is supported: for field `%s` expected type `[4]any_int`, but got `%s`", section_v.names[j], elem_v)
+                        log.errorf("Type error: For vector types only array of any 4 integers is supported: for field `%s` expected type `[4]any_int`, but got `%s`", section_v.names[j], elem_v, location = loc)
                         return false
                     }
                 } else {
@@ -217,7 +268,7 @@ config_save_to_map :: proc(model: ^$T, ini_map: ^ini.Map, string_allocator := co
                 section_map[option_name] = option_str
             }
         case:
-            log.warnf("Sections must be structs: type of section field `%s` is `%v`.", model_ti.names[i], section_ti)
+            log.warnf("Sections must be structs: type of section field `%s` is `%v`.", model_ti.names[i], section_ti, location = loc)
             return false
         }
     }
@@ -247,7 +298,8 @@ get_ini_name :: proc(type_info_struct: ^reflect.Type_Info_Struct, i: i32, tag_na
     }
 }
 
-// Stolen from `<odin-root>/core/flags/internal_rtti.odin:18` because it is private
+// Stolen from `<odin-root>/core/flags/internal_rtti.odin:18` because it is private.
+// Added int_hex parameter as a hack to parse colors.
 @(optimization_mode="favor_size")
 parse_and_set_pointer_by_base_type :: proc(ptr: rawptr, str: string, type_info: ^runtime.Type_Info, int_hex := false) -> bool {
     bounded_int :: proc(value, min, max: i128) -> (result: i128, ok: bool) {
@@ -442,7 +494,7 @@ parse_and_set_pointer_by_base_type :: proc(ptr: rawptr, str: string, type_info: 
     return true
 }
 
-// Stolen from `<odin-root>/core/flags/internal_rtti.odin:335` because it is private
+// Stolen from `<odin-root>/core/flags/internal_rtti.odin:335` because it is private.
 @(optimization_mode="favor_size")
 set_unbounded_integer_by_type :: proc(ptr: rawptr, value: $T, data_type: typeid) where intrinsics.type_is_integer(T) {
     switch data_type {
@@ -501,3 +553,4 @@ import "core:strings"
 import "core:fmt"
 import "core:log"
 import "core:os"
+import "core:mem"

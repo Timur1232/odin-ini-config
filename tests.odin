@@ -46,10 +46,10 @@ c32 = 69+420i
 c64 = -69+420i
 c128 = 69-420i
 
-; [quternions]
-; q64 = 1+2i+3j+4k
-; q128 = 1-2i+3j-4k
-; q256 = 1+2i+3j+4k
+[quaternions]
+q64 = 1+2i+3j+4k
+q128 = 1-2i+3j-4k
+q256 = 1+2i+3j+4k
 `
 
 Test_Config :: struct {
@@ -60,7 +60,7 @@ Test_Config :: struct {
     floats: Floats,
     strings: Strings,
     complex: Complex,
-    // quaternions: Quaternions,
+    quaternions: Quaternions,
 }
 
 Color :: [4]u8
@@ -178,12 +178,12 @@ check :: proc(config: Test_Config) -> bool {
         not_ok |= c128 != 69-420i
     }
 
-    // {
-    //     using quaternions := config.quaternions
-    //     not_ok |= q64 != 1+2i+3j+4k
-    //     not_ok |= q128 != 1-2i+3j-4k
-    //     not_ok |= q256 != 1+2i+3j+4k
-    // }
+    {
+        using quaternions := config.quaternions
+        not_ok |= q64 != 1+2i+3j+4k
+        not_ok |= q128 != 1-2i+3j-4k
+        not_ok |= q256 != 1+2i+3j+4k
+    }
 
     return !not_ok
 }
@@ -206,4 +206,40 @@ test :: proc(t: ^testing.T) {
     testing.expect(t, res == .Ok, fmt.tprintf("Parse error: %v", res))
 
     testing.expect(t, check(config), fmt.tprintf("Incorrect values: %v\n%s", config, data))
+}
+
+// Run test with `-define:LOG_UNRECOGNIZED=true -define:LOG_NOT_PRESENTED=true`
+@(test)
+test_logging :: proc(t: ^testing.T) {
+    defer free_all(context.temp_allocator)
+    defer free_all(context.allocator)
+
+    Bogus_Config :: struct {
+        aboba: struct {
+            urmom: int `ini_option:"test"`,
+            should_be_not_presented: string,
+        },
+        urmom: struct {
+            aboba: f32,
+            test: int `ini_option:"also_should_be_not_presented"`,
+        } `ini_section:"test"`,
+        should_be_not_presented: struct {
+            test: int,
+        },
+    }
+
+    TEST_BOGUS_CONFIG_SRC :: `
+[aboba]
+test = 69
+
+[should_be_unrecognized]
+test = aboba
+
+[test]
+should_be_unrecognized = aboba
+aboba = 67.0
+`
+    config: Bogus_Config
+    res := config_load_from_string(&config, TEST_BOGUS_CONFIG_SRC)
+    testing.expect(t, res == .Ok, fmt.tprintf("Parse error: %v", res))
 }
