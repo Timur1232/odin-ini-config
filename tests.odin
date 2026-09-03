@@ -1,4 +1,3 @@
-// TODO: Fix quaternions
 #+private
 package ini_config
 
