@@ -65,5 +65,5 @@ iniconf.config_load_from_path(&config, "config.ini")
 - [x] Fix quaternions (it wasnt even broken - the test was wrong)
 - [ ] Test all types from `parse_and_set_pointer_by_base_type` function
 - [ ] Modify `parse_and_set_pointer_by_base_type` function to have more descriptive error return instead bool
-- [ ] Clean code?
+- [ ] Clear code?
 - [ ] Custom parsers?
