@@ -54,7 +54,7 @@ some_defaults(&config)
 iniconf.config_load_from_path(&config, "config.ini")
 ```
 
-> [!info]
+> [!NOTE]
 > Be careful with names, as it will skip all unrecognized names and fields that not presented inside ini file without logging by default (see test_logging in tests.odin).
 >
 > To turn on logging not presented sections and options, set `-define:"LOG_NOT_PRESENTED"`.
